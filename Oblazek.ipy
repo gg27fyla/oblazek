@@ -1,0 +1,430 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu May  9 23:17:29 2024
+Version .
+@author: gehri
+"""
+
+import scipy
+import matplotlib.pyplot as plt
+import tkinter as tk
+from tkinter import filedialog
+import pandas as pd
+import numpy as np
+get_ipython().run_line_magic('matplotlib', '')
+
+
+class testApp(tk.Frame):
+    def __init__(self, parent=None):
+        tk.Frame.__init__(self, parent)
+        self.parent = parent
+        self.pack()
+        self.bereiche = []
+        self.createWidgets()
+        self.fig = False
+        self.params = []
+        self.params_err = []
+        self.r2s = []
+        self.r2_adjs = []
+        self.FitStdErrs = []
+
+    def createWidgets(self):
+        self.Startlabel = tk.Label(self, text="Wähle eine Datei aus.")
+        self.Startlabel.pack()
+        
+        self.Startbutton = tk.Button(self, text="Öffnen", command=self.open_dialog)
+        self.Startbutton.pack()
+        
+        self.Closebutton = tk.Button(self, text="Beenden", command=self.end)
+        self.Closebutton.pack()
+        
+        self.Funktions_Label = tk.Text(self, background=self.cget("background"), width=60, height=2, borderwidth=0)
+        self.Funktions_Label.tag_configure("superscript", offset=4)
+        self.Funktions_Label.insert("insert", 'f(x) = a + bx + cx', "", "2", "superscript",
+                                    " + dx", "", "3", "superscript", " + ex", "", "4", "superscript",
+                                    " + fx", "", "5", "superscript", " + gx", "", "-1", "superscript",
+                                    " + hx", "", "-2", "superscript", " + ix", "", "-3", "superscript")
+        self.Funktions_Label.configure(state="disabled")
+        self.Funktions_Label.pack(side='bottom')
+        
+        self.table = tk.LabelFrame(self)
+        self.table.pack(side='bottom', expand=True, ipady=2, pady=5, padx=5)
+        
+        self.Bereich_Hinzufügen_Button = tk.Button(self, text='Bereich hinzufügen', command=self.Bereich_Hinzufügen)
+        self.Bereich_Hinzufügen_Button.pack(side='left', pady=5, padx=5)
+        
+        self.Bereich_Löschen_Button = tk.Button(self, text='Bereich löschen', command=self.Bereich_Löschen)
+        self.Bereich_Löschen_Button.pack(side='left', pady=2, padx=2)
+        
+        
+        self.output_table = tk.LabelFrame(self)
+        self.output_table.pack(after=self.Closebutton)
+        
+        self.createTable()
+        
+        self.Auswertung_Button = tk.Button(self, text='Auswertung', command=self.curve_fit_and_show_plot)
+        self.Auswertung_Button.pack(side='right', pady=5, padx=5)
+        
+
+    def end(self):
+        '''
+        Die Beendenmethode für den Beendenknopf
+        '''
+        self.parent.destroy()
+        plt.close('all')
+        
+
+    def open_dialog(self):
+        '''
+        Methode zur Öffnung der Inputdatei.
+        Startet die Methode zum Lessn und Zeigen des Diagramms.
+        Zeigt zudem den Dateipfad an
+        
+        '''
+        file_path = file_path = filedialog.askopenfilename(title="Select a file")
+        if file_path:
+            try:
+                self.load_and_read(file_path)
+            except ValueError:
+                tk.messagebox.showerror(
+                    'Eingabefehler', 'Bitte eine Exceldatei öffnen!')
+                return
+            self.show_plot()
+            self.Startlabel['text'] = file_path
+            
+
+    def load_and_read(self, file_path):
+        '''
+        Liest die Daten in ein Dataframe ein.
+
+        Parameters
+        ----------
+        file_path : string, path like
+            Der Pfad der Datei.
+        '''
+        self.df = pd.read_excel(file_path)
+        self.dfc = self.df.columns
+        self.df.sort_values(by=[self.dfc[0]], inplace=True, ignore_index=True)
+        self.x = self.df[self.dfc[0]]
+        self.y = self.df[self.dfc[1]]
+        
+        
+
+    def show_plot(self):
+        '''
+        Methode zum Anzeigen der Daten.
+        
+        '''
+        if self.fig:
+            plt.close()
+            self.fig = False
+        self.fig, self.ax = plt.subplots(figsize=(8, 6))
+        self.ax.plot(self.x, self.y, marker='*', label='Data') # Plot the Data
+        self.ax.set_xlabel(self.dfc[0])  # Add an x-label to the axes.
+        self.ax.set_ylabel(self.dfc[1])  # Add a y-label to the axes.
+        self.ax.set_title("Diagramm")  # Add a title to the axes.
+        self.ax.legend()  # Add a legend.
+
+    def curve_fit_and_show_plot(self):
+        """ 
+        Führt die Fittung durch und zeigt sie an.
+
+        """
+        ###################
+        #Defenitionsbereich
+        ###################
+        
+        def sec(df, a, b):
+            """ 
+            Gibt aus einem Datensatz den angegeben Bereich 
+            
+            """
+            return df.loc[(df[self.dfc[0]] >= a) & (df[self.dfc[0]] <= b)]
+
+
+        def fit(fun, x, y, variables):
+            '''
+            Regression und ausgabe von Regressionsparameter.
+
+            Parameters
+            ----------
+            fun : callable
+                Die Funktion an der die Regression durchgeührt werden soll.
+            x : list of float
+                Die x-Werte der Daten.
+            y : list of float
+                Die y-Werte der Daten
+            variables : List of String
+                Die Funktionparameter, die angepasst werden.
+
+            Returns
+            -------
+            list
+                Liste mit den Regressionparameter.
+                p...        Liste der angepassten Funktionparameter
+                p_err...    Liste der Standardfehler der Funktionsparameter
+                r2...       Das Bestimmtheitsmaß
+                r2_adj...   Das adjungierte Bestimmtheitsmaß
+                FitStdErr...Der Standarfehler der Regression
+
+            '''
+            p, c, infodict, mesg, ier = scipy.optimize.curve_fit(lambda x, *args: fun(x, **dict(zip(variables, args)) ), x, y, p0=[1 for var in variables],  full_output=True)
+            p = dict(zip(variables, p))
+            p_err = dict(zip(variables, np.sqrt(np.diag(c))))
+            SSR = sum(infodict['fvec']**2)
+            r2 = 1 - (SSR/sum((y - y.mean())**2))
+            r2_adj = 1 - (1-r2)*(len(x)-1)/((len(x))-len(p))
+            FitStdErr = np.sqrt(SSR/(len(x)-len(p)))
+            return [p, p_err, r2, r2_adj, FitStdErr]
+
+
+        def fun(x, a=0, b=0, c=0, d=0, e=0, f=0, g=0, h=0, i=0):
+            """
+            Regressionsfunktion mit Parameter.
+
+            """
+            return a + b*x + c*x**2 + d*x**3 + e*x**4 + f*x**5 + g/(x) + h/(x**2) + i/(x**3)
+
+
+        def plot(self, fun, params):
+            """
+            Methode zur Erzeugung des Regressionsgrafens
+
+            """
+            line, = self.ax.plot(np.linspace(a, b), fun(np.linspace(a, b), **params), label=bereich[2].get())
+            self.ax.legend()  # Add a legend.
+            plt.pause(0.01)  # redraw fig
+            plt.show()
+            return
+        
+        ###############
+        #Prozedurbreich
+        ###############
+        
+        
+        self.params = []
+        self.params_err = []
+        self.r2s = []
+        self.r2_adjs = []
+        self.FitStdErrs = []
+
+        self.clear_output()
+
+        plt.cla()
+        try:
+            self.ax.plot(self.x, self.y, marker='*', label='Data')
+        except AttributeError:
+            tk.messagebox.showerror('Eingabefehler', 'Keine Daten geladen!')
+            plt.close()
+            return
+        
+        self.ax.set_xlabel(self.dfc[0])  # Add an x-label to the axes.
+        self.ax.set_ylabel(self.dfc[1])  # Add a y-label to the axes.
+        self.ax.set_title("Diagramm")  # Add a title to the axes.
+        self.ax.legend()  # Add a legend.
+
+        for bereich in self.bereiche[1:]:
+            try:
+                a = float(bereich[0].get())
+                b = float(bereich[1].get())
+            except ValueError:
+                tk.messagebox.showerror('Eingabefehler', 'In den Grenzen Zahlen eintragen!')
+                return
+            
+            variables =' '
+            
+            for var in bereich[4]:
+                variables += var.get()
+            
+            if variables[:-1] == "":
+                tk.messagebox.showerror('Eingabefehler', 'Parameter auswählen!')
+                return
+            
+            variables = variables[:-1]
+            variables = variables.split(',')
+            variables = list(map(str.strip, variables))
+
+
+            try:
+                df_Bereich = sec(self.df, a, b)
+            except AttributeError:
+                tk.messagebox.showerror(
+                    'Eingabefehler', 'Keine Daten geladen!')
+                return
+
+            x = df_Bereich[self.dfc[0]]
+            y = df_Bereich[self.dfc[1]]
+            
+            
+            p, p_err, r2, r2_adj, FitStdErr = fit(fun, x, y, variables)
+
+            self.params.append(p)
+            self.params_err.append(p_err)
+            self.r2s.append(r2)
+            self.r2_adjs.append(r2_adj)
+            self.FitStdErrs.append(FitStdErr)
+
+            plot(self, fun, p)
+
+        self.Ausgabe()
+
+    def clear_output(self):
+        self.output_table.destroy()
+        self.output_table = tk.LabelFrame()
+        self.output_table.pack(after=self.Closebutton)
+
+    def Ausgabe(self):
+        output_ = tk.Text(self.output_table)
+        output_.grid(row=0, column=0)
+        scrollb = tk.Scrollbar(self.output_table, command=output_.yview)
+        scrollb.grid(row=0, column=1, sticky='nsew')
+        output_['yscrollcommand'] = scrollb.set
+
+        for i in range(len(self.bereiche)-1):
+            output_.insert('end', 'Funktion ' + self.bereiche[i+1][2].get() + "\n")
+            output_.insert('end', 'Parameter:\n')
+            for param in self.params[i]:
+                output_.insert('end', param + ": ")
+                output_.insert('end', str(np.format_float_scientific(
+                    self.params[i][param], 4, unique=False)) + "\n")
+
+            output_.insert('end', 'Error of Parameter:\n')
+            for param_err in self.params_err[i]:
+                output_.insert('end', param_err + ": ")
+                output_.insert('end', str(np.format_float_scientific(
+                    self.params_err[i][param_err], 4, unique=False)) + "\n")
+
+            output_.insert(
+                'end', "---\nr2: " + str(np.format_float_scientific(self.r2s[i], 4, unique=False)) + "\n")
+            output_.insert(
+                'end', "r2_adj: " + str(np.format_float_scientific(self.r2_adjs[i], 4, unique=False)) + "\n")
+            output_.insert('end', "FitStdErr: " + str(np.format_float_scientific(
+                self.FitStdErrs[i], 4, unique=False)) + "\n-----\n\n")
+        output_.config(state='disabled', height=20, width=50)
+
+    def createTable(self):
+        Label_uG = tk.Label(self.table, text='u. Gr.')
+        Label_oG = tk.Label(self.table, text='o. Gr.')
+        Label_fun = tk.Label(self.table, text='Funktion')
+        Label_Parameter = tk.Label(self.table, text='Parameter')
+
+        Label_uG.grid(row=0, column=0)
+        Label_oG.grid(row=0, column=1)
+        Label_fun.grid(row=0, column=2)
+        Label_Parameter.grid(row=0, column=3)
+
+        self.bereiche.append([Label_uG, Label_oG, Label_fun, Label_Parameter])
+
+        untere_Grenze = tk.Entry(self.table, width=5)
+        obere_Grenze = tk.Entry(self.table, width=5)
+        Funktion = tk.Entry(self.table, width=15)
+        
+        Parameter = tk.LabelFrame(self.table, borderwidth=0)
+        
+        a=tk.StringVar()
+        b=tk.StringVar()
+        c=tk.StringVar()
+        d=tk.StringVar()
+        e=tk.StringVar()
+        f=tk.StringVar()
+        g=tk.StringVar()
+        h=tk.StringVar()
+        i=tk.StringVar()
+        
+        Parameter_a = tk.Checkbutton(Parameter, text="a", onvalue=" a,", variable=a, offvalue="")
+        Parameter_b = tk.Checkbutton(Parameter, text="b", onvalue=" b,", variable=b, offvalue="")
+        Parameter_c = tk.Checkbutton(Parameter, text="c", onvalue=" c,", variable=c, offvalue="")
+        Parameter_d = tk.Checkbutton(Parameter, text="d", onvalue=" d,", variable=d, offvalue="")
+        Parameter_e = tk.Checkbutton(Parameter, text="e", onvalue=" e,", variable=e, offvalue="")
+        Parameter_f = tk.Checkbutton(Parameter, text="f", onvalue=" f,", variable=f, offvalue="")
+        Parameter_g = tk.Checkbutton(Parameter, text="g", onvalue=" g,", variable=g, offvalue="")
+        Parameter_h = tk.Checkbutton(Parameter, text="h", onvalue=" h,", variable=h, offvalue="")
+        Parameter_i = tk.Checkbutton(Parameter, text="i", onvalue=" i,", variable=i, offvalue="")
+        
+        Parameters = [a,b,c,d,e,f,g,h,i]
+        
+        untere_Grenze.grid(row=len(self.bereiche), column=0, padx=2)
+        obere_Grenze.grid(row=len(self.bereiche), column=1, padx=2)
+        Funktion.grid(row=len(self.bereiche), column=2, padx=2)
+        
+        Parameter.grid(row=len(self.bereiche), column=3, padx=2)
+        
+        Parameter_a.grid(row=len(self.bereiche)-1, column=0, padx=2)
+        Parameter_b.grid(row=len(self.bereiche)-1, column=5, padx=2)
+        Parameter_c.grid(row=len(self.bereiche)-1, column=6, padx=2)
+        Parameter_d.grid(row=len(self.bereiche)-1, column=7, padx=2)
+        Parameter_e.grid(row=len(self.bereiche)-1, column=8, padx=2)
+        Parameter_f.grid(row=len(self.bereiche)-1, column=9, padx=2)
+        Parameter_g.grid(row=len(self.bereiche)-1, column=10, padx=2)
+        Parameter_h.grid(row=len(self.bereiche)-1, column=11, padx=2)
+        Parameter_i.grid(row=len(self.bereiche)-1, column=12, padx=2)
+
+
+        self.bereiche.append([untere_Grenze, obere_Grenze, Funktion, Parameter, Parameters])
+
+
+
+    def Bereich_Hinzufügen(self):
+        untere_Grenze = tk.Entry(self.table, width=5)
+        obere_Grenze = tk.Entry(self.table, width=5)
+        Funktion = tk.Entry(self.table, width=15)
+        
+        Parameter = tk.LabelFrame(self.table)
+        
+        a=tk.StringVar()
+        b=tk.StringVar()
+        c=tk.StringVar()
+        d=tk.StringVar()
+        e=tk.StringVar()
+        f=tk.StringVar()
+        g=tk.StringVar()
+        h=tk.StringVar()
+        i=tk.StringVar()
+        
+        Parameter_a = tk.Checkbutton(Parameter, text="a", onvalue=" a,", variable=a, offvalue="")
+        Parameter_b = tk.Checkbutton(Parameter, text="b", onvalue=" b,", variable=b, offvalue="")
+        Parameter_c = tk.Checkbutton(Parameter, text="c", onvalue=" c,", variable=c, offvalue="")
+        Parameter_d = tk.Checkbutton(Parameter, text="d", onvalue=" d,", variable=d, offvalue="")
+        Parameter_e = tk.Checkbutton(Parameter, text="e", onvalue=" e,", variable=e, offvalue="")
+        Parameter_f = tk.Checkbutton(Parameter, text="f", onvalue=" f,", variable=f, offvalue="")
+        Parameter_g = tk.Checkbutton(Parameter, text="g", onvalue=" g,", variable=g, offvalue="")
+        Parameter_h = tk.Checkbutton(Parameter, text="h", onvalue=" h,", variable=h, offvalue="")
+        Parameter_i = tk.Checkbutton(Parameter, text="i", onvalue=" i,", variable=i, offvalue="")
+
+        untere_Grenze.grid(row=len(self.bereiche), column=0)
+        obere_Grenze.grid(row=len(self.bereiche), column=1)
+        Funktion.grid(row=len(self.bereiche), column=2)
+        
+        Parameter.grid(row=len(self.bereiche), column=3)
+        
+        Parameter_a.grid(row=len(self.bereiche)-1, column=0, padx=2)
+        Parameter_b.grid(row=len(self.bereiche)-1, column=1, padx=2)
+        Parameter_c.grid(row=len(self.bereiche)-1, column=2, padx=2)
+        Parameter_d.grid(row=len(self.bereiche)-1, column=3, padx=2)
+        Parameter_e.grid(row=len(self.bereiche)-1, column=4, padx=2)
+        Parameter_f.grid(row=len(self.bereiche)-1, column=5, padx=2)
+        Parameter_g.grid(row=len(self.bereiche)-1, column=10, padx=2)
+        Parameter_h.grid(row=len(self.bereiche)-1, column=11, padx=2)
+        Parameter_i.grid(row=len(self.bereiche)-1, column=12, padx=2)
+
+        Parameters = [a,b,c,d,e,f,g,h,i]
+
+        self.bereiche.append(
+            [untere_Grenze, obere_Grenze, Funktion, Parameter, Parameters])
+
+    def Bereich_Löschen(self):
+        if len(self.bereiche) < 3:
+            return
+
+        self.bereiche[-1][0].destroy()
+        self.bereiche[-1][1].destroy()
+        self.bereiche[-1][2].destroy()
+        self.bereiche[-1][3].destroy()
+        self.bereiche[-1][4].pop()
+        self.bereiche.pop()
+
+
+if __name__ == "__main__":
+    root = tk.Tk(screenName="Auswertung", baseName="Auswertung", className=" Auswertung")
+    app = testApp(root)
+    root.mainloop()
